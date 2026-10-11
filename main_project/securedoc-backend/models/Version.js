@@ -10,6 +10,7 @@ const versionSchema = new mongoose.Schema(
     // this would be replaced/complemented by an IPFS CID from the teammate's
     // blockchain module.
     storagePath: { type: String },
+    ipfsCid: { type: String },
     content: { type: String },
     iv: { type: String }, 
     contentIv: { type: String },

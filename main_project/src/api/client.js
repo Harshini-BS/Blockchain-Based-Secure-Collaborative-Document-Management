@@ -126,6 +126,10 @@ export async function fetchVersions(docId) {
   // GET /api/documents/:id/versions -> [{ version, current, date, by, sha256Hash }]
   return request(`/documents/${docId}/versions`);
 }
+export async function fetchAuditHistory(docId) {
+  if (USE_MOCKS) return auditTrail;
+  return request(`/documents/${docId}/audit`);
+}
 
 export async function restoreVersion(docId, versionNo) {
   if (USE_MOCKS) return { ok: true };
