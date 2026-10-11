@@ -7,6 +7,7 @@ import {
   deleteDocument, downloadDocument, editDocumentContent,
   listAccess, shareDocument, revokeAccess,
   listTrash, restoreFromTrash, permanentlyDelete,
+  getDocumentAudit,
 } from "../controllers/documentController.js";
 import versionRoutes from "./versionRoutes.js";
 
@@ -18,7 +19,7 @@ router.get("/", listDocuments);
 router.get("/trash", listTrash);
 router.post("/", upload.single("file"), createDocument);
 router.post("/text", createTextDocument);
-
+router.get("/:id/audit", loadDocument, getDocumentAudit);
 router.get("/:id", loadDocument, getDocument);
 router.patch("/:id", loadDocument, requireRole("Owner", "Editor"), editDocumentContent);
 router.patch("/:id/rename", loadDocument, requireRole("Owner"), renameDocument);

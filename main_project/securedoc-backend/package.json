@@ -11,6 +11,7 @@
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
+    "ethers": "^6.17.0",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
     "mammoth": "^1.12.2",
@@ -19,6 +20,9 @@
     "pdf-parse": "^2.4.5"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4"
+    "@types/node": "^22.20.4",
+    "hardhat": "^3.17.0",
+    "nodemon": "^3.1.4",
+    "typescript": "~6.0.3"
   }
 }
