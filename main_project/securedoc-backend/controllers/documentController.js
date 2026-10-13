@@ -1,11 +1,18 @@
+
 import { recordAudit } from "../blockchain/auditService.js";
-import { uploadToIPFS, getFromIPFS } from "../blockchain/ipfsService.js";
+import {
+  uploadToIPFS,
+  getFromIPFS,
+} from "../blockchain/ipfsService.js";
 import fs from "fs";
 import path from "path";
 import Document from "../models/Document.js";
 import Version from "../models/Version.js";
 import User from "../models/User.js";
-import { hashBuffer, hashContent } from "../utils/hashFile.js";
+import {
+  hashBuffer,
+  hashContent,
+} from "../utils/hashFile.js";
 import {
   encryptBuffer,
   decryptBuffer,
@@ -15,8 +22,7 @@ import {
 import { extractEditableContent } from "../utils/extractContent.js";
 import crypto from "crypto";
 
-// Record blockchain audit events without failing the main request
-// if the blockchain operation fails.
+// Record blockchain audit events without failing the main request.
 async function auditSafely(documentId, action, userId) {
   try {
     await recordAudit(
@@ -302,6 +308,8 @@ const DOWNLOAD_LIMIT = 15;
 
 // GET /api/documents/:id/download
 export async function downloadDocument(req, res) {
+  console.log("[DOWNLOAD] downloadDocument called");
+
   const now = Date.now();
 
   const recent = (req.user.recentDownloads || []).filter(
@@ -325,6 +333,14 @@ export async function downloadDocument(req, res) {
     req.document.currentVersion
   );
 
+  console.log("[DOWNLOAD] Storage path:", version?.storagePath);
+  console.log(
+    "[DOWNLOAD] Local file exists:",
+    version?.storagePath
+      ? fs.existsSync(version.storagePath)
+      : false
+  );
+
   // Prefer the local encrypted file when it exists.
   if (
     version?.storagePath &&
@@ -332,6 +348,8 @@ export async function downloadDocument(req, res) {
   ) {
     const encrypted = fs.readFileSync(version.storagePath);
     const decrypted = decryptBuffer(encrypted, version.iv);
+
+    console.log("[DOWNLOAD] Decrypted bytes:", decrypted.length);
 
     res.setHeader(
       "Content-Disposition",
@@ -346,9 +364,13 @@ export async function downloadDocument(req, res) {
   }
 
   // Otherwise retrieve the encrypted file from IPFS.
+  console.log("[IPFS] Local file missing; using IPFS fallback");
+
   if (version?.ipfsCid) {
     const encrypted = await getFromIPFS(version.ipfsCid);
     const decrypted = decryptBuffer(encrypted, version.iv);
+
+    console.log("[DOWNLOAD] Decrypted bytes:", decrypted.length);
 
     res.setHeader(
       "Content-Disposition",
@@ -388,7 +410,7 @@ export async function downloadDocument(req, res) {
     );
   }
 
-  res.status(404).json({
+  return res.status(404).json({
     message: "File not available for this version",
   });
 }
@@ -526,15 +548,23 @@ export async function revokeAccess(req, res) {
 
   res.json({ ok: true });
 }
+
+// GET /api/documents/:id/audit
 export async function getDocumentAudit(req, res) {
   try {
-    const { getAuditHistory } = await import("../blockchain/auditService.js");
+    const { getAuditHistory } = await import(
+      "../blockchain/auditService.js"
+    );
 
     const items = await getAuditHistory(req.params.id);
 
     return res.json(items);
   } catch (error) {
-    console.error("[audit] Failed to load audit history:", error);
+    console.error(
+      "[audit] Failed to load audit history:",
+      error
+    );
+
     return res.status(500).json({
       message: "Failed to load blockchain audit history",
     });
