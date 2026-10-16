@@ -8,6 +8,7 @@ import AuditTrail from "../../components/AuditTrail";
 import ShareModal from "../../components/ShareModal";
 import PromptDialog from "../../components/PromptDialog";
 import ConfirmDialog from "../../components/ConfirmDialog";
+import { joinDocument, leaveDocument, emitDocEdit, getSocket } from "../../api/socket";
 
 import {
   fetchDocument,
@@ -20,9 +21,11 @@ import {
   renameDocument,
   deleteDocument,
   downloadDocumentFile,
+  fetchStarStatus,
+  toggleStar,
 } from "../../api/client";
 
-import { joinDocument, leaveDocument, emitDocEdit } from "../../api/socket";
+
 
 export default function DocumentDetail() {
   const { id } = useParams();
@@ -41,6 +44,8 @@ export default function DocumentDetail() {
   const [shareOpen, setShareOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [activity, setActivity] = useState([]);
+  const [starred, setStarred] = useState(false);
 
   async function load() {
     setError("");
@@ -75,6 +80,10 @@ export default function DocumentDetail() {
   }, [id]);
 
   useEffect(() => {
+  fetchStarStatus(id).then((r) => setStarred(r.starred)).catch(() => {});
+}, [id]);
+
+  useEffect(() => {
     const requestedVersion = location.state?.loadVersion;
 
     if (requestedVersion && versions.length > 0) {
@@ -86,6 +95,33 @@ export default function DocumentDetail() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [versions]);
+
+  useEffect(() => {
+  const s = getSocket();
+
+  // another user saved: reload doc, versions and audit trail
+  const onUpdate = ({ docId }) => {
+    if (docId === id) load();
+  };
+const onActivity = (a) => {
+  if (a.docId && a.docId !== id) return;
+  setActivity((prev) => [a, ...prev].slice(0, 20));
+};
+  const onAccess = async ({ docId }) => {
+    if (docId === id) setAccessList(await fetchAccessList(id));
+  };
+
+  s.on("doc:update", onUpdate);
+  s.on("doc:activity", onActivity);
+  s.on("access:changed", onAccess);
+
+  return () => {
+    s.off("doc:update", onUpdate);
+    s.off("doc:activity", onActivity);
+    s.off("access:changed", onAccess);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [id]);
 
   async function handleSave(html) {
     setSaving(true);
@@ -138,6 +174,17 @@ export default function DocumentDetail() {
       await downloadDocumentFile(doc.id, doc.name);
     }
   }
+
+    async function handleDownloadOriginal() {
+    if (doc) {
+      await downloadDocumentFile(doc.id, doc.name, true);
+    }
+  }
+
+  async function handleStar() {
+  const r = await toggleStar(id);
+  setStarred(r.starred);
+}
 
   if (loading) {
     return (
@@ -196,6 +243,10 @@ export default function DocumentDetail() {
           ← Back
         </button>
 
+        <button className="btn btn-ghost btn-sm" onClick={handleStar}>
+         {starred ? "★ Starred" : "☆ Star"}
+        </button>
+
         <div style={{ display: "flex", gap: 8 }}>
           <button
             className="btn btn-ghost btn-sm"
@@ -203,6 +254,8 @@ export default function DocumentDetail() {
           >
             ⬇ Download
           </button>
+
+         
 
           {canRename && (
             <button
@@ -253,7 +306,7 @@ export default function DocumentDetail() {
 
       <CollaboratorsPanel
         collaborators={accessList}
-        activity={[]}
+        activity={activity}
         onShare={() => setShareOpen(true)}
         canShare={doc.role === "Owner"}
       />

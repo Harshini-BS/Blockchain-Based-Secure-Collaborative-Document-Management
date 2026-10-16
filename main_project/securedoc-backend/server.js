@@ -6,6 +6,10 @@ import authRoutes from "./routes/authRoutes.js";
 import documentRoutes from "./routes/documentRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
+import http from "http";
+import { initSocket } from "./socket.js";
+import activityRoutes from "./routes/activityRoutes.js";
+import starRoutes from "./routes/starRoutes.js";
 
 dotenv.config();
 
@@ -18,6 +22,8 @@ app.use("/api/auth", authRoutes);
 app.use("/api/documents", documentRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/activity", activityRoutes);
+app.use("/api/starred", starRoutes);
 
 // Centralized error handler (multer errors, unexpected throws, etc.)
 app.use((err, req, res, next) => {
@@ -26,7 +32,9 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 4000;
+const server = http.createServer(app);
+initSocket(server);
 
 connectDB().then(() => {
-  app.listen(PORT, () => console.log(`[server] SecureDoc API running on port ${PORT}`));
+  server.listen(PORT, () => console.log(`[server] SecureDoc API + Socket.IO running on port ${PORT}`));
 });

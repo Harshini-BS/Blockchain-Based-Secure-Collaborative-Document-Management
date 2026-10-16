@@ -19,6 +19,8 @@ function authHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+
+
 async function request(path, options = {}) {
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
@@ -173,7 +175,7 @@ export async function permanentlyDeleteDocument(docId) {
   return request(`/documents/${docId}/permanent`, { method: "DELETE" });
 }
 
-export async function downloadDocumentFile(docId, fallbackName) {
+export async function downloadDocumentFile(docId, fallbackName,original = false) {
   const res = await fetch(`${BASE_URL}/documents/${docId}/download`, { headers: authHeaders() });
   if (!res.ok) throw new Error("Download failed");
   const blob = await res.blob();
@@ -185,4 +187,19 @@ export async function downloadDocumentFile(docId, fallbackName) {
   a.click();
   a.remove();
   window.URL.revokeObjectURL(url);
+}
+export async function fetchActivity() {
+  return request("/activity");
+}
+
+export async function fetchStarred() {
+  return request("/starred");
+}
+
+export async function fetchStarStatus(docId) {
+  return request(`/starred/${docId}`);
+}
+
+export async function toggleStar(docId) {
+  return request(`/starred/${docId}`, { method: "POST" });
 }
