@@ -245,11 +245,19 @@ export async function getDocument(req, res) {
     ? decryptText(version.content, version.contentIv)
     : undefined;
 
+          const hasOriginalFile = Boolean(
+    await Version.exists({
+      document: req.document._id,
+      storagePath: { $exists: true, $ne: null },
+    })
+  );
+
   res.json({
     id: req.document._id,
     name: req.document.name,
     role: req.docRole,
     hasTextContent: Boolean(version?.content),
+     hasOriginalFile,
     isExtractedFromFile:
       Boolean(version?.storagePath) &&
       Boolean(version?.content),
@@ -307,14 +315,13 @@ const DOWNLOAD_WINDOW_MS = 2 * 60 * 1000;
 const DOWNLOAD_LIMIT = 15;
 
 // GET /api/documents/:id/download
+// GET /api/documents/:id/download  (?original=1 returns the first uploaded file)
 export async function downloadDocument(req, res) {
   console.log("[DOWNLOAD] downloadDocument called");
 
   const now = Date.now();
-
   const recent = (req.user.recentDownloads || []).filter(
-    (d) =>
-      now - new Date(d).getTime() < DOWNLOAD_WINDOW_MS
+    (d) => now - new Date(d).getTime() < DOWNLOAD_WINDOW_MS
   );
 
   if (recent.length >= DOWNLOAD_LIMIT) {
@@ -329,90 +336,82 @@ export async function downloadDocument(req, res) {
   req.user.recentDownloads = recent;
   await req.user.save();
 
-  const version = await Version.findById(
-    req.document.currentVersion
-  );
+  const current = await Version.findById(req.document.currentVersion);
+  const wantOriginal = req.query.original === "1";
 
-  console.log("[DOWNLOAD] Storage path:", version?.storagePath);
-  console.log(
-    "[DOWNLOAD] Local file exists:",
-    version?.storagePath
-      ? fs.existsSync(version.storagePath)
-      : false
-  );
+  // Which version's stored file do we serve?
+  let fileVersion = current;
+  if (wantOriginal) {
+    fileVersion = await Version.findOne({
+      document: req.document._id,
+      storagePath: { $exists: true, $ne: null },
+    }).sort({ versionNo: 1 });
 
-  // Prefer the local encrypted file when it exists.
-  if (
-    version?.storagePath &&
-    fs.existsSync(version.storagePath)
-  ) {
-    const encrypted = fs.readFileSync(version.storagePath);
-    const decrypted = decryptBuffer(encrypted, version.iv);
+    if (!fileVersion) {
+      return res.status(404).json({
+        message: "This document has no original uploaded file",
+      });
+    }
+  }
 
-    console.log("[DOWNLOAD] Decrypted bytes:", decrypted.length);
+  console.log("[DOWNLOAD] Mode:", wantOriginal ? "original" : "current");
+  console.log("[DOWNLOAD] Storage path:", fileVersion?.storagePath);
 
+  const sendFile = (buf) => {
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="${encodeURIComponent(req.document.name)}"`
     );
-    res.setHeader(
-      "Content-Type",
-      "application/octet-stream"
-    );
+    res.setHeader("Content-Type", "application/octet-stream");
+    return res.send(buf);
+  };
 
-    return res.send(decrypted);
+  // 1) Stored upload: local copy first, verified against the saved hash
+  if (fileVersion?.storagePath && fs.existsSync(fileVersion.storagePath)) {
+    try {
+      const encrypted = fs.readFileSync(fileVersion.storagePath);
+      const decrypted = decryptBuffer(encrypted, fileVersion.iv);
+
+      if (hashBuffer(decrypted) === fileVersion.sha256Hash) {
+        console.log("[DOWNLOAD] Local file OK, bytes:", decrypted.length);
+        return sendFile(decrypted);
+      }
+      console.warn("[DOWNLOAD] Local file hash mismatch, falling back to IPFS");
+    } catch (e) {
+      console.warn("[DOWNLOAD] Local file unreadable:", e.message, "- falling back to IPFS");
+    }
   }
 
-  // Otherwise retrieve the encrypted file from IPFS.
-  console.log("[IPFS] Local file missing; using IPFS fallback");
-
-  if (version?.ipfsCid) {
-    const encrypted = await getFromIPFS(version.ipfsCid);
-    const decrypted = decryptBuffer(encrypted, version.iv);
-
-    console.log("[DOWNLOAD] Decrypted bytes:", decrypted.length);
-
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${encodeURIComponent(req.document.name)}"`
-    );
-    res.setHeader(
-      "Content-Type",
-      "application/octet-stream"
-    );
-
-    return res.send(decrypted);
+  // 2) Stored upload: IPFS copy
+  if (fileVersion?.ipfsCid) {
+    try {
+      console.log("[IPFS] Fetching CID:", fileVersion.ipfsCid);
+      const encrypted = await getFromIPFS(fileVersion.ipfsCid);
+      const decrypted = decryptBuffer(encrypted, fileVersion.iv);
+      console.log("[DOWNLOAD] Decrypted bytes (IPFS):", decrypted.length);
+      return sendFile(decrypted);
+    } catch (e) {
+      console.error("[IPFS] fetch failed:", e.message);
+      return res.status(502).json({ message: "Could not retrieve file from IPFS" });
+    }
   }
 
-  // Export text-only versions as HTML.
-  if (version?.content) {
-    const plainHtml = decryptText(
-      version.content,
-      version.contentIv
-    );
-
-    const baseName = req.document.name.replace(
-      /\.[^/.]+$/,
-      ""
-    );
+  // 3) Edited / text-only version: export the saved text as HTML
+  if (current?.content) {
+    const plainHtml = decryptText(current.content, current.contentIv);
+    const baseName = req.document.name.replace(/\.[^/.]+$/, "");
 
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="${encodeURIComponent(baseName)}.html"`
     );
-    res.setHeader(
-      "Content-Type",
-      "text/html; charset=utf-8"
-    );
-
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
     return res.send(
       `<!doctype html><meta charset="utf-8"><title>${baseName}</title>${plainHtml}`
     );
   }
 
-  return res.status(404).json({
-    message: "File not available for this version",
-  });
+  return res.status(404).json({ message: "File not available for this version" });
 }
 
 // PATCH /api/documents/:id
@@ -557,6 +556,8 @@ export async function getDocumentAudit(req, res) {
     );
 
     const items = await getAuditHistory(req.params.id);
+
+    
 
     return res.json(items);
   } catch (error) {
